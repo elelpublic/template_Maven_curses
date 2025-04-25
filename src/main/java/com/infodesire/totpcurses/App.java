@@ -1,10 +1,17 @@
 package com.infodesire.totpcurses;
 
-import dev.samstevens.totp.code.CodeGenerator;
-import dev.samstevens.totp.code.CodeVerifier;
-import dev.samstevens.totp.code.DefaultCodeGenerator;
-import dev.samstevens.totp.code.DefaultCodeVerifier;
-import dev.samstevens.totp.code.HashingAlgorithm;
+import com.googlecode.lanterna.TerminalSize;
+import com.googlecode.lanterna.TextColor;
+import com.googlecode.lanterna.gui2.*;
+import com.googlecode.lanterna.gui2.Button;
+import com.googlecode.lanterna.gui2.GridLayout;
+import com.googlecode.lanterna.gui2.Label;
+import com.googlecode.lanterna.gui2.Panel;
+import com.googlecode.lanterna.screen.Screen;
+import com.googlecode.lanterna.screen.TerminalScreen;
+import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
+import com.googlecode.lanterna.terminal.Terminal;
+import dev.samstevens.totp.code.*;
 import dev.samstevens.totp.exceptions.QrGenerationException;
 import dev.samstevens.totp.qr.QrData;
 import dev.samstevens.totp.qr.QrGenerator;
@@ -13,21 +20,13 @@ import dev.samstevens.totp.secret.DefaultSecretGenerator;
 import dev.samstevens.totp.secret.SecretGenerator;
 import dev.samstevens.totp.time.SystemTimeProvider;
 import dev.samstevens.totp.time.TimeProvider;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import java.awt.*;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.nio.file.Files;
-import java.util.List;
 
 import static dev.samstevens.totp.util.Utils.getDataUriForImage;
 
@@ -45,71 +44,160 @@ public class App {
 
   public static void main( String[] args ) throws ParseException, IOException, QrGenerationException {
 
-    print( "TOTPPOC" );
-    print( "Time-based One Time Password - Proof of Concept" );
-    print( "" );
+    // show a welcome message using lanterna
 
-    options.addOption( "l", true, "length of secret (default 32)" );
-    options.addOption( "a", true, "Name of app issuing secret (default App)" );
-    options.addOption( "s", true, "The secret to be used to verify" );
-    options.addOption( "c", true, "The secret to be used to verify" );
-    options.addOption( "i", false, "Interactive mode" );
+    // Setup terminal and screen layers
+    Terminal terminal = new DefaultTerminalFactory().createTerminal();
+    Screen screen = new TerminalScreen(terminal);
+    screen.startScreen();
 
-    CommandLineParser parser = new DefaultParser();
-    CommandLine commandLine = parser.parse(options, args);
+    // create a menu panel
 
-    if( commandLine.hasOption( "i" ) ) {
-      repl();
-    }
+    // Create a panel to hold the menu items
+    Panel menuPanel = new Panel();
+    menuPanel.setLayoutManager(new GridLayout(1)); // Single column layout
 
-    List<String> argslist = commandLine.getArgList();
+    // Add menu options as buttons
+    menuPanel.addComponent(new Button("Generate Secret", () -> {
+      generateSecret( screen );
+    }));
 
-    if( argslist.isEmpty() ) {
-      usage( "No command given. Entering interactive mode." );
-      repl();
-    }
+    menuPanel.addComponent(new Button("Verify Code", () -> {
+      verifyCode( screen );
+    }));
 
-    String command = argslist.get( 0 );
+    menuPanel.addComponent(new Button("Quit", () -> {
+      // Action for "Quit"
+      System.exit(0);
+    }));
 
-    if( command.equals( "secret" ) ) {
-      String keyLength = commandLine.getOptionValue( "l" );
-      String appName = commandLine.getOptionValue( "a" );
-      secret( keyLength, appName );
-    }
-    else if( command.equals( "verify" ) ) {
-      String secret = commandLine.getOptionValue( "s" );
-      String code = commandLine.getOptionValue( "c" );
-      verify( secret, code );
-    }
+    // Create a window to hold the menu
+    BasicWindow menuWindow = new BasicWindow("Main Menu");
+    menuWindow.setComponent(menuPanel);
+
+    // Create and start the GUI
+    MultiWindowTextGUI gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLUE));
+    gui.addWindowAndWait(menuWindow);
 
   }
 
-  private static void repl() throws IOException, QrGenerationException {
-    BufferedReader in = new BufferedReader( new InputStreamReader( System.in ) );
-    String command = null;
-    do {
-      print( "" );
-      print( "Enter command: secret, verify, quit" );
-      command = in.readLine();
-      if( command.equals( "secret" ) ) {
-        print( "Enter key length (Enter for 32):" );
-        String keyLength = in.readLine();
-        print( "Enter app name (Enter for \"App\"):" );
-        String appName = in.readLine();
-        secret( keyLength, appName );
+  private static void verifyCode(Screen screen) {
+
+    // input form for key length and app name
+
+    // Create a new window for the input form
+    BasicWindow inputWindow = new BasicWindow("Verify Code");
+
+    // Create a panel to hold the form components
+    Panel formPanel = new Panel();
+    formPanel.setLayoutManager(new GridLayout(2)); // Two-column layout
+
+    // Add input fields
+    formPanel.addComponent(new Label("Secret:"));
+    TextBox secretInput = new TextBox();
+    formPanel.addComponent(secretInput);
+
+    formPanel.addComponent(new Label("Code:"));
+    TextBox codeInput = new TextBox();
+    formPanel.addComponent(codeInput);
+
+    // Add a submit button
+    formPanel.addComponent(new EmptySpace(new TerminalSize(0, 0))); // Empty space for alignment
+    formPanel.addComponent(new Button("Submit", () -> {
+      String secret = secretInput.getText();
+      String code = codeInput.getText();
+      // Call the secret generation logic
+      try {
+        verify(screen, secret, code);
+      } catch (Exception e) {
+        e.printStackTrace();
       }
-      else if( command.equals( "verify" ) ) {
-        print( "Enter secret: " );
-        String secret = in.readLine();
-        print( "Enter code: " );
-        String code = in.readLine();
-        verify( secret, code );
-      }
-    }
-    while( !command.equals( "quit" ) );
+      // Close the input window
+      inputWindow.close();
+    }));
+
+    // Set the panel as the window's component
+    inputWindow.setComponent(formPanel);
+
+    // Display the input window
+    MultiWindowTextGUI gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLUE));
+    gui.addWindowAndWait(inputWindow);
+
   }
 
-  private static void secret( String keyLength, String appName ) throws QrGenerationException, IOException {
+  private static void generateSecret(Screen screen) {
+
+    // input form for key length and app name
+
+    // Create a new window for the input form
+    BasicWindow inputWindow = new BasicWindow("Generate Secret");
+
+    // Create a panel to hold the form components
+    Panel formPanel = new Panel();
+    formPanel.setLayoutManager(new GridLayout(2)); // Two-column layout
+
+    // Add input fields
+    formPanel.addComponent(new Label("Key Length:"));
+    TextBox keyLengthInput = new TextBox();
+    keyLengthInput.setText("32"); // Default value
+    formPanel.addComponent(keyLengthInput);
+
+    formPanel.addComponent(new Label("App Name:"));
+    TextBox appNameInput = new TextBox();
+    appNameInput.setText("App"); // Default value
+    formPanel.addComponent(appNameInput);
+
+    // Add a submit button
+    formPanel.addComponent(new EmptySpace(new TerminalSize(0, 0))); // Empty space for alignment
+    formPanel.addComponent(new Button("Submit", () -> {
+      String keyLength = keyLengthInput.getText();
+      String appName = appNameInput.getText();
+      // Call the secret generation logic
+      try {
+        secret(screen,keyLength, appName);
+      } catch (Exception e) {
+        e.printStackTrace();
+      }
+
+      // Close the input window
+      inputWindow.close();
+    }));
+
+    // Set the panel as the window's component
+    inputWindow.setComponent(formPanel);
+
+    // Display the input window
+    MultiWindowTextGUI gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLUE));
+    gui.addWindowAndWait(inputWindow);
+
+  }
+
+//  private static void repl() throws IOException, QrGenerationException {
+//    BufferedReader in = new BufferedReader( new InputStreamReader( System.in ) );
+//    String command = null;
+//    do {
+//      print( "" );
+//      print( "Enter command: secret, verify, quit" );
+//      command = in.readLine();
+//      if( command.equals( "secret" ) ) {
+//        print( "Enter key length (Enter for 32):" );
+//        String keyLength = in.readLine();
+//        print( "Enter app name (Enter for \"App\"):" );
+//        String appName = in.readLine();
+//        secret( keyLength, appName );
+//      }
+//      else if( command.equals( "verify" ) ) {
+//        print( "Enter secret: " );
+//        String secret = in.readLine();
+//        print( "Enter code: " );
+//        String code = in.readLine();
+//        verify( secret, code );
+//      }
+//    }
+//    while( !command.equals( "quit" ) );
+//  }
+
+  private static void secret( Screen screen, String keyLength, String appName ) throws QrGenerationException, IOException {
 
     SecretGenerator secretGenerator = keyLength == null || keyLength.trim().length() == 0
       ? new DefaultSecretGenerator()
@@ -120,9 +208,6 @@ public class App {
     if( appName == null || appName.trim().length() == 0 ) {
       appName = "App";
     }
-
-    print( "Add this secret to your authenticator app: " );
-    print( secret );
 
     QrData data = new QrData.Builder()
       .label("example@example.com")
@@ -138,14 +223,6 @@ public class App {
 
     File imageFile = new File( "target/qr.png" );
     File htmlFile = new File( "target/qr.html" );
-
-    Files.write( imageFile.toPath(), imageData);
-    print( "Or scan the QR code in this file using your authenticator app: " );
-    print( imageFile.getAbsolutePath() );
-
-    print( "" );
-    print( "The app name is: " + appName );
-
     String dataUri = getDataUriForImage(imageData, "img/png" );
     PrintWriter html = new PrintWriter( htmlFile );
     html.println( "<html><body>" );
@@ -158,18 +235,33 @@ public class App {
     Desktop.getDesktop().open( imageFile );
     Desktop.getDesktop().open( htmlFile );
 
+    Files.write( imageFile.toPath(), imageData);
+    StringBuilder sb = new StringBuilder();
+    sb.append( "Add this secret to your authenticator app:\n" );
+    sb.append( "App Name: " + appName + "\n" );
+    sb.append( "Secret: " + secret + "\n" );
+    sb.append( "\n" );
+    sb.append( "Or scan the QR code in this file using your authenticator app:\n" );
+    sb.append( imageFile.getAbsolutePath() + "\n" );
+    sb.append( "\n" );
+    sb.append( "Or open this file in your browser:\n" );
+    sb.append( htmlFile.getAbsolutePath() + "\n" );
+    sb.append( "\n" );
+
+    showAlert( screen, sb.toString() );
+
   }
 
 
-  private static void verify( String secret, String code ) {
+  private static void verify(Screen screen, String secret, String code ) {
 
     if( secret == null ) {
-      usage( "Secret missing" );
+      usage( screen, "Secret missing" );
       return;
     }
 
     if( code == null ) {
-      usage( "Code missing" );
+      usage( screen, "Code missing" );
       return;
     }
 
@@ -180,27 +272,38 @@ public class App {
 // secret = the shared secret for the user
 // code = the code submitted by the user
     boolean successful = verifier.isValidCode(secret, code);
-
-    print( "Verify: " + ( successful ? "OK" : "failed" ) );
+    showAlert( screen, "Verification Result: " + (successful ? "OK" : "failed"));
 
   }
 
-  private static void usage( String message ) {
+  private static void showAlert(Screen screen, String message) {
+    // show an alert box on screen
+    BasicWindow alertWindow = new BasicWindow("Verification Result");
+    Panel alertPanel = new Panel();
+    alertPanel.setLayoutManager(new GridLayout(1)); // Single column layout
+    alertPanel.addComponent(new Label(message));
+    alertPanel.addComponent(new Button("OK", () -> {
+      // Close the alert window
+      alertWindow.close();
+    }));
+    alertWindow.setComponent(alertPanel);
+    MultiWindowTextGUI gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLUE));
+    gui.addWindowAndWait(alertWindow);
+  }
+
+  private static void usage(Screen screen, String message ) {
 
     HelpFormatter formatter = new HelpFormatter();
-    print( message );
-    formatter.printHelp("totppoc [options] command", options);
-    print( "" );
-    print( "commands:" );
-    print( "secret \t generates secret to import into authenticator app" );
-    print( "verify \t verify a code" );
+    StringBuilder sb = new StringBuilder();
+    sb.append( message );
+    sb.append( "Usage: totppoc [options] command\n" );
+    sb.append( "\n" );
+    sb.append( "commands:\n" );
+    sb.append( "secret \t generates secret to import into authenticator app\n" );
+    sb.append( "verify \t verify a code\n" );
+    showAlert( screen, sb.toString() );
 
   }
-
-  private static void print( String line ) {
-    System.out.println( line );
-  }
-
 
 }
 
